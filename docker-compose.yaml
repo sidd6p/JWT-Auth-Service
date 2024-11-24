@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    container_name: fastapi_app
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    environment:
+      - POSTGRES_HOST=postgres_db
+    networks:
+      - app-network
+    env_file:
+      - .env
+
+  db:
+    image: postgres:latest
+    container_name: postgres_db
+    networks:
+      - app-network
+    restart: always
+    command: ["postgres", "-c", "fsync=off"]
+    env_file:
+      - .env
+
+networks:
+  app-network:
+    driver: bridge
