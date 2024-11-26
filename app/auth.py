@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.schemas import UserCreate, UserLogin, Token, RevokeTokenRequest
 from app.database import get_db
+from jwt.exceptions import InvalidTokenError
+
 from app.utils import (
     verify_password,
     create_access_token,
@@ -34,12 +36,12 @@ async def sign_up(user: UserCreate, db: AsyncSession = Depends(get_db)):
         )
     
     try:
-        await save_new_user(db, user)
+        user_id = await save_new_user(db, user)
 
         logger.info("User created successfully for email: %s", user.email)
-        access_token = await create_access_token(data={"user": user.email})
+        access_token = await create_access_token(data={"user_id": user_id})
         
-        await save_active_token(db, user.email, access_token)
+        await save_active_token(db, user_id, access_token)
         return {"access_token": access_token, "token_type": "bearer"}
     except Exception as e:
         logger.error("Error during signup for email %s: %s", user.email, str(e))
@@ -66,7 +68,7 @@ async def sign_in(user: UserLogin, db: AsyncSession = Depends(get_db)):
     if access_token:
         await delete_active_token(db, user=user.email)
     
-    access_token = await create_access_token(data={"user": db_user.email})
+    access_token = await create_access_token(data={"email": db_user.email})
     
     await save_active_token(db, user.email, access_token)
 
@@ -76,14 +78,14 @@ async def sign_in(user: UserLogin, db: AsyncSession = Depends(get_db)):
 # Revoke - Delete the token (either by user or by token)
 @router.post("/revoke", status_code=status.HTTP_200_OK)
 async def revoke_token(request: RevokeTokenRequest, db: AsyncSession = Depends(get_db)):
-    token = request.access_token
-    logger.info("Revoke token request received for token: %s", token)
+    active_token = request.access_token
+    logger.info("Revoke token request received for token: %s", active_token)
 
-    if await delete_active_token(db, token=token):
-        logger.info("Token revoked successfully: %s", token)
+    if await delete_active_token(db, active_token=active_token):
+        logger.info("Token revoked successfully: %s", active_token)
         return {"message": "Token revoked successfully."}
     else:
-        logger.warning("Token already revoked or invalid: %s", token)
+        logger.warning("Token already revoked or invalid: %s", active_token)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="The provided token is Invalid or already revoked."
@@ -92,41 +94,37 @@ async def revoke_token(request: RevokeTokenRequest, db: AsyncSession = Depends(g
 # Refresh - Remove the old token and create a new one
 @router.post("/refresh", response_model=Token, status_code=status.HTTP_200_OK)
 async def refresh_token(request: RevokeTokenRequest, db: AsyncSession = Depends(get_db)):
-    token = request.access_token
-    logger.info("Refresh token request received for token: %s", token)
+    active_token = request.access_token
+    logger.info("Refresh token request received for token: %s", active_token)
     
     try:
-        decoded = await decode_token(token)
-        if "user" not in decoded or "exp" not in decoded:
-            logger.warning("Refresh failed: Invalid token used: %s", token)
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="The provided token is Invalid."
-            )
-
-        if await delete_active_token(db, token=token):
-            logger.info("Old token revoked successfully: %s", token)
+        print("DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD")
+        await check_active_token(db, active_token)
+        print("GGGGGGGGGGGGGGG")
+        decoded = await decode_token(active_token)
+        print(decoded)
+        
+        if await delete_active_token(db, active_token=active_token):
+            logger.info("Old token revoked successfully: %s", active_token)
         else:
-            logger.warning("Token already revoked: %s", token)
+            logger.warning("Token already revoked: %s", active_token)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="The provided token is Invalid or already revoked."
             )
+        new_token = await create_access_token(data={"user": decoded["email"]})
+        await save_active_token(db, decoded["email"], new_token)
         
-        new_token = await create_access_token(data={"user": decoded["user"]})
-        
-        await save_active_token(db, decoded["user"], new_token)
-        
-        logger.info("Token refreshed successfully for user: %s", decoded["user"])
+        logger.info("Token refreshed successfully for user: %s", decoded["email"])
         return {"access_token": new_token, "token_type": "bearer"}
     except jwt.ExpiredSignatureError:
-        logger.warning("Refresh failed: Expired token used: %s", token)
+        logger.warning("Refresh failed: Expired token used: %s", active_token)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="The provided token is expired."
         )
     except jwt.InvalidTokenError:
-        logger.warning("Refresh failed: Invalid token used: %s", token)
+        logger.warning("Refresh failed: Invalid token used: %s", active_token)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
     except Exception as e:
         logger.error("Unexpected error during token refresh: %s", e)
