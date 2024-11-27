@@ -1,8 +1,29 @@
 
 # API Documentation for Authentication and Token Management
 
+
+## Table of Contents
+
+1. [Overview](#overview)
+2. [Endpoints](#endpoints)
+   - [POST /signup](#post-signup)
+   - [POST /signin](#post-signin)
+   - [PUT /refresh](#put-refresh)
+   - [DELETE /revoke](#delete-revoke)
+   - [GET /authorize-token](#get-authorize-token)
+   - [GET /health](#get-health)
+3. [Database Configuration & Secret](#database-configuration--secret)
+4. [Installation](#installation)
+5. [Logging](#logging)
+6. [Example Usage](#example-usage)
+7. [Dependencies](#dependencies)
+8. [License](#license)
+
+
+
 ## Overview
 This API provides endpoints for user authentication, token generation, and management. It supports user signup, sign-in, token refresh, revocation, and health checks. The API is built using FastAPI and SQLAlchemy with async support for database operations.
+
 
 ## Endpoints
 
