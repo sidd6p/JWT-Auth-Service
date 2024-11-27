@@ -151,6 +151,9 @@ The API logs all requests and errors using Python's built-in logging module. The
 
 
 ## Example Usage
+> CURL CMD Tested on Window 11
+
+
 1. **Signup**:
    ```bash
     curl --location --request POST "http://localhost:8000/auth/signup" --header "Content-Type: application/json" --data-raw "{\"email\": \"abc@gmail.com\", \"password\": \"abc\"}"
