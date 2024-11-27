@@ -10,6 +10,11 @@ services:
       - db
     environment:
       - POSTGRES_HOST=postgres_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=stydjbSDF23dsajfiO
+      - POSTGRES_DB=auth
+      - SECRET_KEY=34912@445dfsdFBSD23reg@F587
+      - ACCESS_TOKEN_EXPIRE_MINUTES=15
     networks:
       - app-network
     env_file:
@@ -22,8 +27,10 @@ services:
       - app-network
     restart: always
     command: ["postgres", "-c", "fsync=off"]
-    env_file:
-      - .env
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=stydjbSDF23dsajfiO
+      - POSTGRES_DB=auth
 
 networks:
   app-network:
