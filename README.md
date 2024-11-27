@@ -129,8 +129,6 @@ For JWT and secret, it require following environment variables as well:
 - **SECRET_KEY**: Random and big string
 - **ACCESS_TOKEN_EXPIRE_MINUTES**: Expire time of JWT tokens
 
-> You can check more details on env_example.txt file. 
-
 ## Installation
 
 1. Clone the repository:
