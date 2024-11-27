@@ -392,19 +392,24 @@ async def authorize_token(
 # Health check - Ensure database connection is active
 @router.get("/health", status_code=status.HTTP_200_OK)
 async def health_check(db: AsyncSession = Depends(get_db)):
-    logger.info("Health check endpoint hit")
+    """
+    Checks if the database connection is active and operational.
+    Returns a healthy status if the database connection is successful.
+    """
+    log_route("/health", logging.INFO, "Health check endpoint hit.")
 
     try:
-        # Check database connection
+        # Verify the database connection by executing a simple query
         result_value = await check_db_connection(db)
 
         if result_value == 1:
-            logger.info("Database connection is healthy")
+            log_route("/health", logging.INFO, "Database connection is healthy.")
             return {"status": "healthy"}
         else:
-            logger.error(
-                "Health check failed: Unexpected result from database (result_value=%d)",
-                result_value,
+            log_route(
+                "/health",
+                logging.ERROR,
+                f"Unexpected result from database during health check (result_value={result_value}).",
             )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -412,7 +417,7 @@ async def health_check(db: AsyncSession = Depends(get_db)):
             )
 
     except Exception as e:
-        logger.error("Health check failed: Database connection error: %s", str(e))
+        log_route("/health", logging.ERROR, f"Database connection error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Database connection error. Please try again later.",

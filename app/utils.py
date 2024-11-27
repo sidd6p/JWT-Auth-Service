@@ -194,18 +194,22 @@ async def check_user(db: AsyncSession, email: str):
 
 async def check_db_connection(db: AsyncSession) -> bool:
     """
-    Check if the database connection is alive and working.
-    This function is used for health checks to verify the system's integrity.
+    Verifies if the database connection is active and operational.
+    Used for health checks to ensure the database is responsive and working properly.
     """
     try:
         logger.info("check_db_connection: Checking the database connection.")
+
+        # Execute a simple query to test the database connection
         result = db.execute(select(1))
-        return (
-            result.scalars().first() is not None
-        )  # Return True if the connection is valid
+
+        # Return True if the connection is valid (i.e., the query succeeds)
+        return result.scalars().first() is not None
+
     except DatabaseError as e:
         logger.error(f"check_db_connection: Database connection error: {e}")
         raise DatabaseError("Error checking database connection.")
+
     except Exception as e:
         logger.error(f"check_db_connection: Error checking database connection: {e}")
         raise RuntimeError("Error checking database connection.")
