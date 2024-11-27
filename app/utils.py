@@ -289,13 +289,13 @@ async def check_access_token(
 
     except jwt.ExpiredSignatureError:
         await delete_access_token(db, access_token=access_token)
-        logger.warning("decode_token: Token is Expired")
+        logger.warning("check_access_token: Token is Expired")
         raise jwt.ExpiredSignatureError("Token is Expired")
     except jwt.InvalidTokenError:
-        logger.warning("decode_token: Invalid token.")
+        logger.warning("check_access_token: Invalid token.")
         raise jwt.InvalidTokenError("Invalid token.")
     except Exception as e:
-        logger.error(f"decode_token: Error decoding token: {e}")
+        logger.error(f"check_access_token: Error decoding token: {e}")
         raise RuntimeError("Error decoding token.")
 
 
@@ -327,11 +327,14 @@ async def delete_access_token(
             db.delete(db_token)
             db.commit()
             logger.info("delete_access_token: Successfully deleted active token.")
-            return True
+            return
 
         logger.warning("delete_access_token: No active token found to delete.")
-        return False
+        raise jwt.InvalidTokenError("Invalid JWT token.")
 
+    except jwt.InvalidTokenError:
+        logger.warning("delete_access_token: Invalid token.")
+        raise jwt.InvalidTokenError("Invalid token.")
     except DatabaseError as e:
         logger.error(
             f"delete_access_token: Database error while deleting active token: {e}"

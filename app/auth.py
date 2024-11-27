@@ -2,18 +2,21 @@ import logging
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.schemas import UserCreate, UserLogin, Token, RevokeTokenRequest
+from app.schemas import (
+    UserCreate,
+    UserLogin,
+    Token,
+    RevokeTokenRequest,
+    AuthorizeResponse,
+)
 from app.database import get_db
-from sqlalchemy.exc import IntegrityError, DatabaseError
 
 from app.utils import (
     check_db_connection,
     verify_password,
     create_access_token,
-    decode_token,
     delete_access_token,
     check_access_token,
-    save_access_token,
     save_new_user,
     check_user,
     log_route,
@@ -31,16 +34,17 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-# Signup - Create new user and issue a new token
 @router.post("/signup", response_model=Token, status_code=status.HTTP_201_CREATED)
 async def sign_up(user: UserCreate, db: AsyncSession = Depends(get_db)):
     """
     Handles the user signup process by:
-    1. Checking if the email is already registered.
+    1. Checking if the email is already registered in the database.
     2. Creating a new user in the database if the email is not already taken.
     3. Generating an access token for the newly created user.
-    4. Saving the generated token as active for the user.
-    If any step fails, an appropriate error is logged and returned to the client.
+    4. Returning the generated token and its type as "bearer".
+
+    If any step fails (e.g., email already registered, database issues), an appropriate error is logged,
+    and an HTTPException is raised with a corresponding error message.
     """
     log_route(
         "/signup", logging.INFO, f"Signup request received for email: {user.email}"
@@ -71,27 +75,30 @@ async def sign_up(user: UserCreate, db: AsyncSession = Depends(get_db)):
         # Generate and save an access token for the new user using the user ID
         access_token = await create_access_token(db, data={"user_id": user_id})
 
-        # Return the access token and token type
         return {"access_token": access_token, "token_type": "bearer"}
 
     except Exception as e:
         log_route(
             "/signup",
             logging.ERROR,
-            f"Unexpected error during signup for email {user.email}: {str(e)}",
+            f"An error occurred during signup for email {user.email}: {str(e)}",
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error while processing signup. Please try again later.",
+            detail="An error occurred while processing your request. Please try again later.",
         )
 
 
-# Signin - Authenticate user and replace old token with new one
 @router.post("/signin", response_model=Token, status_code=status.HTTP_200_OK)
 async def sign_in(user: UserLogin, db: AsyncSession = Depends(get_db)):
     """
-    Authenticates a user by verifying their email and password.
-    If valid, generates and returns a new access token while invalidating any previous token.
+    Authenticates a user by:
+    1. Verifying the user's email and password.
+    2. If valid, generating a new access token for the user.
+    3. Invalidating any previous tokens associated with the user.
+    4. Returning the new access token with the token type "bearer".
+
+    If authentication fails (invalid credentials), an HTTPException is raised with an appropriate error message.
     """
     log_route(
         "/signin", logging.INFO, f"Signin request received for email: {user.email}"
@@ -114,7 +121,6 @@ async def sign_in(user: UserLogin, db: AsyncSession = Depends(get_db)):
         # Generate a new access token for the user
         access_token = await create_access_token(db, data={"user_id": db_user.id})
 
-        # Log the successful signin
         log_route(
             "/signin",
             logging.INFO,
@@ -135,14 +141,19 @@ async def sign_in(user: UserLogin, db: AsyncSession = Depends(get_db)):
         )
 
 
-# Refresh - Remove the old token and create a new one
-@router.post("/refresh", response_model=Token, status_code=status.HTTP_200_OK)
+@router.put("/refresh", response_model=Token, status_code=status.HTTP_200_OK)
 async def refresh_token(
     request: RevokeTokenRequest, db: AsyncSession = Depends(get_db)
 ):
     """
-    Refreshes the user's access token by validating the old token.
-    If valid, generates and returns a new token, invalidating the old one.
+    Refreshes the user's access token by:
+    1. Validating the provided old token.
+    2. If valid, generating a new access token for the user.
+    3. Invalidating the old token.
+    4. Returning the new access token with the token type "bearer".
+
+    If any step fails (e.g., token expired, invalid token), an appropriate error is logged,
+    and an HTTPException is raised with a corresponding error message.
     """
     access_token = request.access_token
 
@@ -173,7 +184,7 @@ async def refresh_token(
     except jwt.ExpiredSignatureError as e:
         log_route(
             "/refresh",
-            logging.WARNING,
+            logging.ERROR,
             f"Refresh failed: Expired token used: {access_token} : {e}",
         )
         raise HTTPException(
@@ -202,10 +213,19 @@ async def refresh_token(
         )
 
 
-# Revoke - Delete the token (either by user or by token)
-@router.post("/revoke", status_code=status.HTTP_200_OK)
+@router.delete("/revoke", status_code=status.HTTP_204_NO_CONTENT)
 async def revoke_token(request: RevokeTokenRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Revokes a user's access token by:
+    1. Deleting the provided token from the database.
+    2. Invalidating the token to prevent further use for authentication.
+    3. If the token is not found, raises an error indicating the token is invalid.
+
+    If an error occurs (e.g., invalid token or server error), an appropriate error message
+    is logged, and an HTTPException is raised with a corresponding status and message.
+    """
     access_token = request.access_token
+
     log_route(
         "/revoke",
         logging.INFO,
@@ -213,28 +233,22 @@ async def revoke_token(request: RevokeTokenRequest, db: AsyncSession = Depends(g
     )
 
     try:
-        if await delete_access_token(db, access_token=access_token):
-            log_route(
-                "/revoke", logging.INFO, f"Token revoked successfully: {access_token}"
-            )
-            return {"message": "Token revoked successfully."}
-        else:
-            log_route(
-                "/revoke",
-                logging.WARNING,
-                f"Token already revoked or invalid: {access_token}",
-            )
-            raise jwt.InvalidTokenError(
-                "The provided token is invalid or already revoked."
-            )
+        # Attempt to delete the token from the database
+        await delete_access_token(db, access_token=access_token)
+        log_route(
+            "/revoke", logging.INFO, f"Token revoked successfully: {access_token}"
+        )
 
     except jwt.InvalidTokenError as e:
         log_route(
             "/revoke",
-            logging.WARNING,
-            f"Revocation  failed: Invalid token used: {access_token}",
+            logging.ERROR,
+            f"Revocation failed: Invalid token used: {access_token}",
         )
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"{e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid token.",
+        )
 
     except Exception as e:
         log_route(
@@ -246,14 +260,17 @@ async def revoke_token(request: RevokeTokenRequest, db: AsyncSession = Depends(g
         )
 
 
-# Authorize Token - Check if the provided token is valid and authorized
-@router.post("/authorize-token", response_model=Token, status_code=status.HTTP_200_OK)
+@router.get(
+    "/authorize-token", response_model=AuthorizeResponse, status_code=status.HTTP_200_OK
+)
 async def authorize_token(
     request: RevokeTokenRequest, db: AsyncSession = Depends(get_db)
 ):
     """
-    Verifies the validity of the provided access token. If the token is valid and authorized,
-    returns the token and associated user data. If not, raises an error.
+    Verifies the validity of the provided access token by:
+    1. Checking if the token is active and authorized in the database.
+    2. Returning the token and associated user data if valid.
+    3. If invalid, raises an error with appropriate status and message.
     """
     access_token = request.access_token
     log_route(
@@ -265,29 +282,20 @@ async def authorize_token(
     try:
         # Check if the token is active and authorized in the database
         decoded = await check_access_token(db, access_token=access_token)
-        if decoded:
-            log_route(
-                "/authorize-token", logging.INFO, f"Token is authorized: {access_token}"
-            )
+        log_route(
+            "/authorize-token", logging.INFO, f"Token is authorized: {access_token}"
+        )
 
-            # Return the token and associated user data if valid
-            return {
-                "access_token": access_token,
-                "token_type": "bearer",
-                "user_id": decoded["user_id"],
-            }
-        else:
-            log_route(
-                "/authorize-token",
-                logging.WARNING,
-                f"Unauthorized or revoked token: {access_token}",
-            )
-            raise jwt.InvalidTokenError("Invalid JWT token.")
-    except jwt.ExpiredSignatureError:
+        # Return the token and associated user data if valid
+        return {
+            "user_id": decoded["user_id"],
+        }
+
+    except jwt.ExpiredSignatureError as e:
         log_route(
             "/authorize-token",
             logging.WARNING,
-            f"Authorization failed: Expired token used: {access_token}",
+            f"Authorization failed: Expired token used: {access_token} : {e}",
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -297,9 +305,12 @@ async def authorize_token(
         log_route(
             "/authorize-token",
             logging.WARNING,
-            f"Authorization failed: Invalid token used: {access_token}",
+            f"Authorization failed: Invalid token used: {access_token} : {e}",
         )
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail={e})
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid token",
+        )
     except Exception as e:
         log_route(
             "/authorize-token",
@@ -312,12 +323,13 @@ async def authorize_token(
         )
 
 
-# Health check - Ensure database connection is active
 @router.get("/health", status_code=status.HTTP_200_OK)
 async def health_check(db: AsyncSession = Depends(get_db)):
     """
-    Checks if the database connection is active and operational.
-    Returns a healthy status if the database connection is successful.
+    Checks the health of the database connection by:
+    1. Verifying if the database connection is active.
+    2. Returning a healthy status if the database is operational.
+    3. Raising an error if the connection fails or the database is unavailable.
     """
     log_route("/health", logging.INFO, "Health check endpoint hit.")
 
@@ -335,13 +347,13 @@ async def health_check(db: AsyncSession = Depends(get_db)):
                 f"Unexpected result from database during health check (result_value={result_value}).",
             )
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Health Check failed. Please try again later.",
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Health Check failed. Database is unavailable.",
             )
 
     except Exception as e:
         log_route("/health", logging.ERROR, f"Database connection error: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Health Check failed. Please try again later.",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Health Check failed. Database is unavailable.",
         )

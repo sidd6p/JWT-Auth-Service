@@ -18,3 +18,7 @@ class Token(BaseModel):
 
 class RevokeTokenRequest(BaseModel):
     access_token: str
+
+
+class AuthorizeResponse(BaseModel):
+    user_id: int
