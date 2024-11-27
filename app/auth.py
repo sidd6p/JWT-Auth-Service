@@ -55,7 +55,7 @@ async def sign_up(user: UserCreate, db: AsyncSession = Depends(get_db)):
 @router.post("/signin", response_model=Token, status_code=status.HTTP_200_OK)
 async def sign_in(user: UserLogin, db: AsyncSession = Depends(get_db)):
     logger.info("Signin request received for email: %s", user.email)
-    
+
     # Check if the user exists
     db_user = await check_user(db, user.email)
     if not db_user or not verify_password(user.password, db_user.hashed_password):
@@ -64,7 +64,7 @@ async def sign_in(user: UserLogin, db: AsyncSession = Depends(get_db)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials. Please check your email and password.",
         )
-    
+
     try:
         # Check and delete existing active token
         token_deleted = await delete_active_token(db, user_id=db_user.id)
@@ -76,7 +76,7 @@ async def sign_in(user: UserLogin, db: AsyncSession = Depends(get_db)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to revoke the existing token. Please try again later.",
         )
-    
+
     # Create a new token
     try:
         access_token = await create_access_token(data={"user_id": db_user.id})
@@ -85,12 +85,13 @@ async def sign_in(user: UserLogin, db: AsyncSession = Depends(get_db)):
         logger.info("User signed in successfully for email: %s", user.email)
         return {"access_token": access_token, "token_type": "bearer"}
     except Exception as e:
-        logger.error(f"Error during token generation or save for user ID {db_user.id}: {e}")
+        logger.error(
+            f"Error during token generation or save for user ID {db_user.id}: {e}"
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to generate a new token. Please try again later.",
         )
-
 
 
 # Refresh - Remove the old token and create a new one

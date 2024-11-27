@@ -11,8 +11,8 @@ import logging
 
 load_dotenv()
 
-SECRET_KEY = os.getenv("SECRET_KEY", "oaWndjh2348fg@#dDFYRTJ2@31") 
-ALGORITHM = "HS256"  
+SECRET_KEY = os.getenv("SECRET_KEY", "oaWndjh2348fg@#dDFYRTJ2@31")
+ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 15))
 
 # Password hashing context using bcrypt
@@ -33,6 +33,7 @@ def hash_password(password: str) -> str:
         logger.error(f"Error hashing password: {e}")
         raise RuntimeError("Error hashing password.")
 
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """
     Verify the plain password against the hashed password.
@@ -45,6 +46,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         logger.error(f"Error verifying password: {e}")
         raise RuntimeError("Error verifying password.")
 
+
 async def create_access_token(data: dict, expires_delta: timedelta = None) -> str:
     """
     Generate a JWT access token with an expiration time.
@@ -53,7 +55,9 @@ async def create_access_token(data: dict, expires_delta: timedelta = None) -> st
     try:
         # Copy the data and add an expiration time to the payload
         to_encode = data.copy()
-        expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+        expire = datetime.utcnow() + (
+            expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        )
         to_encode.update({"exp": expire})  # Set expiration time for the token
 
         # Generate the JWT token using the secret key and algorithm
@@ -61,6 +65,7 @@ async def create_access_token(data: dict, expires_delta: timedelta = None) -> st
     except Exception as e:
         logger.error(f"Error creating access token: {e}")
         raise RuntimeError("Error creating access token.")
+
 
 async def decode_token(active_token: str):
     """
@@ -73,7 +78,9 @@ async def decode_token(active_token: str):
         return payload
     except jwt.ExpiredSignatureError:
         logger.warning("Token has expired.")
-        raise RuntimeError("Token has expired.")  # Raise an error if the token has expired
+        raise RuntimeError(
+            "Token has expired."
+        )  # Raise an error if the token has expired
     except jwt.InvalidTokenError:
         logger.warning("Invalid token.")
         raise RuntimeError("Invalid token.")  # Raise an error if the token is invalid
@@ -102,6 +109,7 @@ async def save_new_user(db: AsyncSession, user) -> int:
         db.rollback()  # Rollback any changes in case of error
         raise RuntimeError("Error saving new user.")
 
+
 async def check_user(db: AsyncSession, email: str):
     """
     Check if a user with the given email exists in the database.
@@ -115,6 +123,7 @@ async def check_user(db: AsyncSession, email: str):
         logger.error(f"Error checking user: {e}")
         raise RuntimeError("Error checking user.")
 
+
 async def check_db_connection(db: AsyncSession) -> bool:
     """
     Check if the database connection is alive and working.
@@ -123,7 +132,9 @@ async def check_db_connection(db: AsyncSession) -> bool:
     try:
         # Execute a simple query to test the database connection
         result = db.execute(select(1))
-        return result.scalars().first() is not None  # Return True if the connection is valid
+        return (
+            result.scalars().first() is not None
+        )  # Return True if the connection is valid
     except Exception as e:
         logger.error(f"Error checking database connection: {e}")
         raise RuntimeError("Error checking database connection.")
@@ -157,6 +168,7 @@ async def save_active_token(db: AsyncSession, user_id: int, active_token: str):
         db.rollback()  # Ensure to rollback the transaction if there is an error
         raise RuntimeError("Error saving active token.")
 
+
 async def check_active_token(
     db: AsyncSession, user_id: int = None, active_token: str = None
 ) -> ActiveToken | None:
@@ -165,19 +177,27 @@ async def check_active_token(
     This function verifies whether the provided token is still valid and active.
     """
     if not user_id and not active_token:
-        raise InvalidTokenError("Either user_id or active_token must be provided.")  # Must provide either user_id or active_token
+        raise InvalidTokenError(
+            "Either user_id or active_token must be provided."
+        )  # Must provide either user_id or active_token
 
     try:
         # Query for active token either by user_id or active_token
         if user_id:
-            result = db.execute(select(ActiveToken).filter(ActiveToken.user_id == user_id))
+            result = db.execute(
+                select(ActiveToken).filter(ActiveToken.user_id == user_id)
+            )
         elif active_token:
-            result = db.execute(select(ActiveToken).filter(ActiveToken.active_token == active_token))
+            result = db.execute(
+                select(ActiveToken).filter(ActiveToken.active_token == active_token)
+            )
 
         db_token = result.scalar_one_or_none()
 
         if not db_token:
-            raise InvalidTokenError("No active token found for the provided input.")  # If no active token is found, raise an error
+            raise InvalidTokenError(
+                "No active token found for the provided input."
+            )  # If no active token is found, raise an error
 
         return db_token  # Return the found active token
     except InvalidTokenError as e:
@@ -185,16 +205,22 @@ async def check_active_token(
         raise e  # Raise the InvalidTokenError
     except Exception as e:
         logger.error(f"Error checking active token: {e}")
-        raise RuntimeError("Unexpected error while checking active token.")  # Raise a general runtime error for unexpected issues
+        raise RuntimeError(
+            "Unexpected error while checking active token."
+        )  # Raise a general runtime error for unexpected issues
 
 
-async def delete_active_token(db: AsyncSession, user_id: int = None, active_token: str = None) -> bool:
+async def delete_active_token(
+    db: AsyncSession, user_id: int = None, active_token: str = None
+) -> bool:
     """
     Delete an active token based on user_id or active_token.
     This function ensures that any active token is properly revoked when the user logs out or refreshes the token.
     """
     if not user_id and not active_token:
-        raise RuntimeError("Either user_id or active_token must be provided.")  # Must provide either user_id or active_token
+        raise RuntimeError(
+            "Either user_id or active_token must be provided."
+        )  # Must provide either user_id or active_token
 
     try:
         # Determine the query based on the provided user_id or active_token
@@ -203,7 +229,7 @@ async def delete_active_token(db: AsyncSession, user_id: int = None, active_toke
             query = select(ActiveToken).filter(ActiveToken.user_id == user_id)
         elif active_token:
             query = select(ActiveToken).filter(ActiveToken.active_token == active_token)
-        
+
         result = db.execute(query)
         db_token = result.scalar_one_or_none()
 
@@ -218,4 +244,6 @@ async def delete_active_token(db: AsyncSession, user_id: int = None, active_toke
     except Exception as e:
         logger.error(f"Error deleting active token: {e}")
         db.rollback()  # Rollback the transaction if any error occurs
-        raise RuntimeError("Error deleting active token.")  # Raise error for issues during deletion
+        raise RuntimeError(
+            "Error deleting active token."
+        )  # Raise error for issues during deletion
