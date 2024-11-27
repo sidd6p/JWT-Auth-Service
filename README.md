@@ -140,7 +140,7 @@ For JWT and secret, it require following environment variables as well:
    ```
 2. Set up environment variables (e.g., database connection strings, secret keys) in a `.env` file.
    - Create .env file in folder
-   - Copy paste the content of env_example.txt file into .env filr
+   - Copy paste the content of env_example.txt file into .env file
 
 4. Run the docker compose file:
    ```bash
