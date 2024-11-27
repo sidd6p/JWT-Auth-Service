@@ -320,6 +320,10 @@ async def revoke_token(request: RevokeTokenRequest, db: AsyncSession = Depends(g
 async def authorize_token(
     request: RevokeTokenRequest, db: AsyncSession = Depends(get_db)
 ):
+    """
+    Verifies the validity of the provided access token. If the token is valid and authorized,
+    returns the token and associated user data. If not, raises an error.
+    """
     active_token = request.access_token
     log_route(
         "/authorize-token",
@@ -328,21 +332,14 @@ async def authorize_token(
     )
 
     try:
-        # Check if the token is active and authorized
-        if await check_active_token(db, active_token=active_token):
+        # Check if the token is active and authorized in the database
+        decoded = await check_active_token(db, active_token=active_token)
+        if decoded:
             log_route(
                 "/authorize-token", logging.INFO, f"Token is authorized: {active_token}"
             )
 
-            # Decode the token to verify its contents
-            decoded = await decode_token(active_token)
-            log_route(
-                "/authorize-token",
-                logging.INFO,
-                f"Decoded token for user ID: {decoded['user_id']}",
-            )
-
-            # Return a response with the decoded token data
+            # Return the token and associated user data if valid
             return {
                 "access_token": active_token,
                 "token_type": "bearer",
@@ -354,10 +351,7 @@ async def authorize_token(
                 logging.WARNING,
                 f"Unauthorized or revoked token: {active_token}",
             )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="The provided token is either unauthorized or already revoked.",
-            )
+            raise jwt.InvalidTokenError("Invalid JWT token.")
     except jwt.ExpiredSignatureError:
         log_route(
             "/authorize-token",

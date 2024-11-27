@@ -260,7 +260,8 @@ async def check_active_token(
     db: AsyncSession, user_id: int = None, active_token: str = None
 ) -> ActiveToken | None:
     """
-    Check if an active token exists for the user.
+    Check if an active token exists for the user or validate the provided active token.
+    If the token exists but is expired, delete it and return None.
     This function is used to verify the user's current active token during authentication or token refresh.
     """
     try:
@@ -269,20 +270,45 @@ async def check_active_token(
             result = db.execute(
                 select(ActiveToken).filter(ActiveToken.user_id == user_id)
             )
-            return (
-                result.scalar_one_or_none()
-            )  # Return the active token if found, otherwise None
+            db_token = result.scalar_one_or_none()
+
+            # If token found, check if it's expired
+            if db_token:
+                payload = await decode_token(db_token.active_token)
+                if "user_id" not in payload or "exp" not in payload:
+                    raise jwt.InvalidTokenError("Invalid JWT token.")
+                return payload  # Return the active token if valid
+            return None  # Return None if no active token found
+
         if active_token:
             logger.info(f"check_active_token: Checking active token {active_token}")
             result = db.execute(
                 select(ActiveToken).filter(ActiveToken.active_token == active_token)
             )
-            return (
-                result.scalar_one_or_none()
-            )  # Return the active token if found, otherwise None
-    except NoResultFound as e:
-        logger.error(f"check_active_token: No active token found for the user: {e}")
-        raise NoResultFound("Active token not found.")
+            db_token = result.scalar_one_or_none()
+
+            # If token found, check if it's expired
+            if db_token:
+                payload = await decode_token(db_token.active_token)
+                if "user_id" not in payload or "exp" not in payload:
+                    raise jwt.InvalidTokenError("Invalid JWT token.")
+                return payload  # Return the active token if valid
+            return None  # Return None if no active token found
+
+        # Return None if neither user_id nor active_token is provided
+        logger.error("check_active_token: Neither user_id nor active_token provided.")
+        return None
+
+    except jwt.ExpiredSignatureError:
+        await delete_active_token(db, active_token=active_token)
+        logger.warning("decode_token: Token has expired.")
+        raise jwt.ExpiredSignatureError("Token has expired.")
+    except jwt.InvalidTokenError:
+        logger.warning("decode_token: Invalid token.")
+        raise jwt.InvalidTokenError("Invalid token.")
+    except Exception as e:
+        logger.error(f"decode_token: Error decoding token: {e}")
+        raise RuntimeError("Error decoding token.")
     except Exception as e:
         logger.error(f"check_active_token: Error checking active token: {e}")
         raise RuntimeError("Error checking active token.")
