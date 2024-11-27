@@ -138,21 +138,11 @@ For JWT and secret, it require following environment variables as well:
    git clone https://github.com/sidd6p/JWT-Auth-Service.git
    cd JWT-Auth-Service
    ```
+2. Set up environment variables (e.g., database connection strings, secret keys) in a `.env` file.
+   - Create .env file in folder
+   - Copy paste the content of env_example.txt file into .env filr
 
-2. Create a virtual environment and activate it:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. Set up environment variables (e.g., database connection strings, secret keys) in a `.env` file.
-
-5. Run the docker compose file:
+4. Run the docker compose file:
    ```bash
    docker-compose up
    ```
