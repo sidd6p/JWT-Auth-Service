@@ -13,7 +13,7 @@
    - [GET /authorize-token](#get-authorize-token)
    - [GET /health](#get-health)
 3. [Database Configuration & Secret](#database-configuration--secret)
-4. [Installation](#installation)
+4. [Installation on localhost](#installation)
 5. [Logging](#logging)
 6. [Example Usage](#example-usage)
 7. [Dependencies](#dependencies)
