@@ -129,6 +129,8 @@ For JWT and secret, it require following environment variables as well:
 - **SECRET_KEY**: Random and big string
 - **ACCESS_TOKEN_EXPIRE_MINUTES**: Expire time of JWT tokens
 
+> keys and secret in docker-compose file are for docker file, it is easy to run app using docker. It is never a good idea to put any key or secret hard coded.
+
 ## Installation
 
 1. Clone the repository:
