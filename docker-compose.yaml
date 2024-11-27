@@ -17,8 +17,6 @@ services:
       - ACCESS_TOKEN_EXPIRE_MINUTES=15
     networks:
       - app-network
-    env_file:
-      - .env
 
   db:
     image: postgres:latest
