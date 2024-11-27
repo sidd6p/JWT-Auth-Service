@@ -3,6 +3,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
 
+
 class User(Base):
     __tablename__ = "users"
 
@@ -13,6 +14,7 @@ class User(Base):
 
     active_token = relationship("ActiveToken", back_populates="user", uselist=False)
 
+
 class ActiveToken(Base):
     __tablename__ = "active_tokens"
 
@@ -20,6 +22,6 @@ class ActiveToken(Base):
     active_token = Column(String, unique=True, nullable=False)
     created_at = Column(DateTime, default=func.now())
 
-    user_id = Column(Integer, ForeignKey('users.id'), nullable=False)  
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
 
     user = relationship("User", back_populates="active_token")
