@@ -1,13 +1,16 @@
 import os
 import jwt
+import logging
+
 from datetime import datetime, timedelta
 from passlib.context import CryptContext
 from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from app.models import ActiveToken, User
-from jwt.exceptions import InvalidTokenError
-import logging
+from sqlalchemy.exc import DatabaseError, IntegrityError
+from sqlalchemy.orm.exc import NoResultFound
+from fastapi import HTTPException, status
 
 load_dotenv()
 
@@ -18,7 +21,18 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 15))
 # Password hashing context using bcrypt
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler(), logging.FileHandler("app.log")],
+)
+
 logger = logging.getLogger(__name__)
+
+
+# Helper function to log route and request time
+def log_route(route: str, level: str, message: str):
+    logger.log(level, f"Route: {route} - {message}")
 
 
 def hash_password(password: str) -> str:
@@ -27,10 +41,16 @@ def hash_password(password: str) -> str:
     This function is used to securely store the password in the database.
     """
     try:
-        # Using bcrypt for hashing the password
+        logger.info("hash_password: Hashing the password")
         return pwd_context.hash(password)
+    except ValueError as e:
+        logger.error(f"hash_password: Value error while hashing password: {e}")
+        raise ValueError("Error hashing password due to invalid value.")
+    except TypeError as e:
+        logger.error(f"hash_password: Type error while hashing password: {e}")
+        raise TypeError("Error hashing password due to incorrect type.")
     except Exception as e:
-        logger.error(f"Error hashing password: {e}")
+        logger.error(f"hash_password: Error hashing password: {e}")
         raise RuntimeError("Error hashing password.")
 
 
@@ -40,10 +60,16 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     This function is used to authenticate the user during login.
     """
     try:
-        # Verifying if the plain password matches the hashed one
+        logger.info("verify_password: Verifying the password")
         return pwd_context.verify(plain_password, hashed_password)
+    except ValueError as e:
+        logger.error(f"verify_password: Value error while verifying password: {e}")
+        raise ValueError("Error verifying password due to invalid value.")
+    except TypeError as e:
+        logger.error(f"verify_password: Type error while verifying password: {e}")
+        raise TypeError("Error verifying password due to incorrect type.")
     except Exception as e:
-        logger.error(f"Error verifying password: {e}")
+        logger.error(f"verify_password: Error verifying password: {e}")
         raise RuntimeError("Error verifying password.")
 
 
@@ -53,17 +79,26 @@ async def create_access_token(data: dict, expires_delta: timedelta = None) -> st
     This function is used to create tokens for authenticated users after successful login or signup.
     """
     try:
-        # Copy the data and add an expiration time to the payload
+        logger.info("create_access_token: Creating JWT access token")
         to_encode = data.copy()
         expire = datetime.utcnow() + (
             expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         )
         to_encode.update({"exp": expire})  # Set expiration time for the token
-
-        # Generate the JWT token using the secret key and algorithm
         return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    except jwt.ExpiredSignatureError as e:
+        logger.error(f"create_access_token: JWT signature expired: {e}")
+        raise jwt.ExpiredSignatureError("JWT signature has expired.")
+    except jwt.InvalidTokenError as e:
+        logger.error(f"create_access_token: Invalid JWT token: {e}")
+        raise jwt.InvalidTokenError("Invalid JWT token.")
+    except ValueError as e:
+        logger.error(
+            f"create_access_token: Value error while creating access token: {e}"
+        )
+        raise ValueError("Error with input data while creating access token.")
     except Exception as e:
-        logger.error(f"Error creating access token: {e}")
+        logger.error(f"create_access_token: Error creating access token: {e}")
         raise RuntimeError("Error creating access token.")
 
 
@@ -73,54 +108,87 @@ async def decode_token(active_token: str):
     This function is used to decode and verify the token when performing operations like token refresh.
     """
     try:
-        # Decode the JWT token using the secret key and algorithm
+        logger.info("decode_token: Decoding the JWT token")
         payload = jwt.decode(active_token, SECRET_KEY, algorithms=[ALGORITHM])
         return payload
     except jwt.ExpiredSignatureError:
-        logger.warning("Token has expired.")
-        raise RuntimeError(
-            "Token has expired."
-        )  # Raise an error if the token has expired
+        logger.warning("decode_token: Token has expired.")
+        raise jwt.ExpiredSignatureError("Token has expired.")
     except jwt.InvalidTokenError:
-        logger.warning("Invalid token.")
-        raise RuntimeError("Invalid token.")  # Raise an error if the token is invalid
+        logger.warning("decode_token: Invalid token.")
+        raise jwt.InvalidTokenError("Invalid token.")
     except Exception as e:
-        logger.error(f"Error decoding token: {e}")
+        logger.error(f"decode_token: Error decoding token: {e}")
         raise RuntimeError("Error decoding token.")
 
 
 async def save_new_user(db: AsyncSession, user) -> int:
     """
-    Save a new user to the database after hashing the password.
-    This function is used during the signup process to create a new user account.
+    Hashes the user's password and saves the user in the database.
+    Ensures that the email is unique and handles potential database errors.
     """
     try:
-        # Create a new user object with the email and hashed password
+        logger.info(
+            f"save_new_user: Attempting to save a new user with email {user.email}."
+        )
+
+        # Hash the user's password and create a new user object
         new_user = User(email=user.email, hashed_password=hash_password(user.password))
 
-        # Add the new user to the session and commit the transaction
+        # Add the user to the session
         db.add(new_user)
         db.commit()
-        db.refresh(new_user)  # Refresh the session to get the new user's id
+        db.refresh(new_user)
 
-        return new_user.id  # Return the user's id after successful creation
+        logger.info(
+            f"save_new_user: Successfully saved user with email {user.email} and ID {new_user.id}."
+        )
+        return new_user.id
+
+    except IntegrityError as e:
+        logger.error(
+            f"save_new_user: Integrity error while saving user with email {user.email}: {e}"
+        )
+        db.rollback()
+        raise IntegrityError(f"User with email {user.email} already exists.")
+    except DatabaseError as e:
+        logger.error(
+            f"save_new_user: Database error while saving user with email {user.email}: {e}"
+        )
+        db.rollback()
+        raise DatabaseError("Database error occurred while saving user.")
     except Exception as e:
-        logger.error(f"Error saving new user: {e}")
-        db.rollback()  # Rollback any changes in case of error
+        logger.error(
+            f"save_new_user: Unexpected error while saving user with email {user.email}: {e}"
+        )
+        db.rollback()
         raise RuntimeError("Error saving new user.")
 
 
 async def check_user(db: AsyncSession, email: str):
     """
-    Check if a user with the given email exists in the database.
-    This function is used during both signup and login to verify if a user exists.
+    Verifies if a user with the specified email exists in the database.
+    Used during both signup and signin to check for existing user accounts.
     """
     try:
-        # Execute a query to find the user by email
+        logger.info(f"check_user: Checking if user with email {email} exists.")
+
+        # Query the database for a user with the given email
         result = db.execute(select(User).filter(User.email == email))
-        return result.scalar_one_or_none()  # Return the user if found, otherwise None
+
+        # Return the user object if found, otherwise None
+        return result.scalar_one_or_none()
+
+    except NoResultFound as e:
+        logger.error(f"check_user: User with email {email} not found: {e}")
+        raise NoResultFound(f"User with email {email} does not exist.")
+
+    except DatabaseError as e:
+        logger.error(f"check_user: Database error while checking user: {e}")
+        raise DatabaseError("Error checking user in the database.")
+
     except Exception as e:
-        logger.error(f"Error checking user: {e}")
+        logger.error(f"check_user: Unexpected error while checking user: {e}")
         raise RuntimeError("Error checking user.")
 
 
@@ -130,13 +198,16 @@ async def check_db_connection(db: AsyncSession) -> bool:
     This function is used for health checks to verify the system's integrity.
     """
     try:
-        # Execute a simple query to test the database connection
+        logger.info("check_db_connection: Checking the database connection.")
         result = db.execute(select(1))
         return (
             result.scalars().first() is not None
         )  # Return True if the connection is valid
+    except DatabaseError as e:
+        logger.error(f"check_db_connection: Database connection error: {e}")
+        raise DatabaseError("Error checking database connection.")
     except Exception as e:
-        logger.error(f"Error checking database connection: {e}")
+        logger.error(f"check_db_connection: Error checking database connection: {e}")
         raise RuntimeError("Error checking database connection.")
 
 
@@ -146,26 +217,38 @@ async def save_active_token(db: AsyncSession, user_id: int, active_token: str):
     This function is used to track the current active token associated with the user.
     """
     try:
-        # Check if the user already has an active token
+        logger.info(
+            f"save_active_token: Saving or updating active token for user {user_id}"
+        )
         result = db.execute(select(ActiveToken).filter(ActiveToken.user_id == user_id))
         db_token = result.scalar_one_or_none()
 
         if db_token:
-            # If the token already exists, update it with the new token
             db_token.active_token = active_token
             db.commit()
             db.refresh(db_token)
             return db_token  # Return the updated token
         else:
-            # If no active token exists, create a new active token
             db_token = ActiveToken(active_token=active_token, user_id=user_id)
             db.add(db_token)
             db.commit()
             db.refresh(db_token)
             return db_token  # Return the new active token
+    except IntegrityError as e:
+        logger.error(
+            f"save_active_token: Integrity error while saving active token: {e}"
+        )
+        db.rollback()
+        raise IntegrityError("Error with unique constraints while saving active token.")
+    except DatabaseError as e:
+        logger.error(
+            f"save_active_token: Database error while saving active token: {e}"
+        )
+        db.rollback()
+        raise DatabaseError("Error saving active token to the database.")
     except Exception as e:
-        logger.error(f"Error saving active token: {e}")
-        db.rollback()  # Ensure to rollback the transaction if there is an error
+        logger.error(f"save_active_token: Error saving active token: {e}")
+        db.rollback()
         raise RuntimeError("Error saving active token.")
 
 
@@ -173,77 +256,82 @@ async def check_active_token(
     db: AsyncSession, user_id: int = None, active_token: str = None
 ) -> ActiveToken | None:
     """
-    Check if an active token exists for a given user or token.
-    This function verifies whether the provided token is still valid and active.
+    Check if an active token exists for the user.
+    This function is used to verify the user's current active token during authentication or token refresh.
     """
-    if not user_id and not active_token:
-        raise InvalidTokenError(
-            "Either user_id or active_token must be provided."
-        )  # Must provide either user_id or active_token
-
     try:
-        # Query for active token either by user_id or active_token
         if user_id:
+            logger.info(f"check_active_token: Checking active token for user {user_id}")
             result = db.execute(
                 select(ActiveToken).filter(ActiveToken.user_id == user_id)
             )
-        elif active_token:
+            return (
+                result.scalar_one_or_none()
+            )  # Return the active token if found, otherwise None
+        if active_token:
+            logger.info(f"check_active_token: Checking active token {active_token}")
             result = db.execute(
                 select(ActiveToken).filter(ActiveToken.active_token == active_token)
             )
-
-        db_token = result.scalar_one_or_none()
-
-        if not db_token:
-            raise InvalidTokenError(
-                "No active token found for the provided input."
-            )  # If no active token is found, raise an error
-
-        return db_token  # Return the found active token
-    except InvalidTokenError as e:
-        logger.warning(f"Invalid token error: {e}")
-        raise e  # Raise the InvalidTokenError
+            return (
+                result.scalar_one_or_none()
+            )  # Return the active token if found, otherwise None
+    except NoResultFound as e:
+        logger.error(f"check_active_token: No active token found for the user: {e}")
+        raise NoResultFound("Active token not found.")
     except Exception as e:
-        logger.error(f"Error checking active token: {e}")
-        raise RuntimeError(
-            "Unexpected error while checking active token."
-        )  # Raise a general runtime error for unexpected issues
+        logger.error(f"check_active_token: Error checking active token: {e}")
+        raise RuntimeError("Error checking active token.")
 
 
 async def delete_active_token(
     db: AsyncSession, user_id: int = None, active_token: str = None
 ) -> bool:
-    """
-    Delete an active token based on user_id or active_token.
-    This function ensures that any active token is properly revoked when the user logs out or refreshes the token.
-    """
     if not user_id and not active_token:
-        raise RuntimeError(
-            "Either user_id or active_token must be provided."
-        )  # Must provide either user_id or active_token
+        logger.error(
+            "delete_active_token: Neither user_id nor active_token was provided."
+        )
+        raise RuntimeError("Either user_id or active_token must be provided.")
 
     try:
-        # Determine the query based on the provided user_id or active_token
+        logger.info(
+            f"delete_active_token: Attempting to delete active token for user_id={user_id} or active_token={active_token}"
+        )
+
         query = None
         if user_id:
             query = select(ActiveToken).filter(ActiveToken.user_id == user_id)
+            logger.info(f"delete_active_token: Filtering by user_id={user_id}")
         elif active_token:
             query = select(ActiveToken).filter(ActiveToken.active_token == active_token)
+            logger.info(
+                f"delete_active_token: Filtering by active_token={active_token}"
+            )
 
         result = db.execute(query)
         db_token = result.scalar_one_or_none()
 
         if db_token:
-            # If token exists, delete it
+            logger.info(
+                f"delete_active_token: Found active token, deleting token: {db_token}"
+            )
             db.delete(db_token)
             db.commit()
-            return True  # Return True indicating successful deletion
+            logger.info("delete_active_token: Successfully deleted active token.")
+            return True
 
-        # If no token was found, just return True (no token to delete)
-        return True
+        logger.warning("delete_active_token: No active token found to delete.")
+        return False
+
+    except DatabaseError as e:
+        logger.error(
+            f"delete_active_token: Database error while deleting active token: {e}"
+        )
+        db.rollback()
+        raise DatabaseError("Error deleting active token from the database.")
     except Exception as e:
-        logger.error(f"Error deleting active token: {e}")
-        db.rollback()  # Rollback the transaction if any error occurs
-        raise RuntimeError(
-            "Error deleting active token."
-        )  # Raise error for issues during deletion
+        logger.error(
+            f"delete_active_token: Unexpected error while deleting active token: {e}"
+        )
+        db.rollback()
+        raise RuntimeError("Error deleting active token.")
