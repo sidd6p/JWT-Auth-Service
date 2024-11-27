@@ -1,102 +1,97 @@
 
-# FastAPI Authentication Service
+# API Documentation for Authentication and Token Management
 
-This repository contains a FastAPI-based authentication service with functionality for user signup, login, token refresh, token revocation, and health check. The service uses JWT for token management and integrates with an asynchronous database using SQLAlchemy.
+## Overview
+This API provides endpoints for user authentication, token generation, and management. It supports user signup, sign-in, token refresh, revocation, and health checks. The API is built using FastAPI and SQLAlchemy with async support for database operations.
 
-## Features
-
-- **Signup**: Create a new user and issue a new JWT token.
-- **Signin**: Authenticate an existing user and issue a new JWT token.
-- **Refresh**: Refresh an expired or revoked token with a new one.
-- **Revoke**: Revoke (delete) an active token.
-- **Health Check**: Ensure that the database connection is active and functional.
-
-## API Endpoints
+## Endpoints
 
 ### `POST /signup`
-Creates a new user and issues a JWT token.
-
-**Request Body:**
-```json
-{
-  "email": "user@example.com",
-  "password": "strongpassword"
-}
-```
-
-**Response:**
-```json
-{
-  "access_token": "jwt-token-here",
-  "token_type": "bearer"
-}
-```
+- **Description**: Handles user signup. It checks if the email is already registered, creates a new user, and returns an access token.
+- **Request Body**: 
+  ```json
+  {
+    "email": "user@example.com",
+    "password": "password123"
+  }
+  ```
+- **Response**:
+  ```json
+  {
+    "access_token": "your-access-token",
+    "token_type": "bearer"
+  }
+  ```
 
 ### `POST /signin`
-Authenticates an existing user and returns a new JWT token.
+- **Description**: Authenticates a user by verifying their credentials and returning an access token.
+- **Request Body**: 
+  ```json
+  {
+    "email": "user@example.com",
+    "password": "password123"
+  }
+  ```
+- **Response**:
+  ```json
+  {
+    "access_token": "your-access-token",
+    "token_type": "bearer"
+  }
+  ```
 
-**Request Body:**
-```json
-{
-  "email": "user@example.com",
-  "password": "strongpassword"
-}
-```
+### `PUT /refresh`
+- **Description**: Refreshes an existing access token by validating the old token and generating a new one.
+- **Request Body**:
+  ```json
+  {
+    "access_token": "old-access-token"
+  }
+  ```
+- **Response**:
+  ```json
+  {
+    "access_token": "new-access-token",
+    "token_type": "bearer"
+  }
+  ```
 
-**Response:**
-```json
-{
-  "access_token": "jwt-token-here",
-  "token_type": "bearer"
-}
-```
+### `DELETE /revoke`
+- **Description**: Revokes an access token by deleting it from the database.
+- **Request Body**:
+  ```json
+  {
+    "access_token": "access-token-to-revoke"
+  }
+  ```
+- **Response**: 
+  - Status: `204 No Content`
 
-### `POST /refresh`
-Refreshes an expired or revoked JWT token.
-
-**Request Body:**
-```json
-{
-  "access_token": "old-jwt-token"
-}
-```
-
-**Response:**
-```json
-{
-  "access_token": "new-jwt-token",
-  "token_type": "bearer"
-}
-```
-
-### `POST /revoke`
-Revokes an active JWT token.
-
-**Request Body:**
-```json
-{
-  "access_token": "jwt-token-here"
-}
-```
-
-**Response:**
-```json
-{
-  "message": "Token revoked successfully."
-}
-```
+### `GET /authorize-token`
+- **Description**: Verifies if an access token is valid and returns user data if the token is authorized.
+- **Request Body**:
+  ```json
+  {
+    "access_token": "valid-access-token"
+  }
+  ```
+- **Response**:
+  ```json
+  {
+    "user_id": 123
+  }
+  ```
 
 ### `GET /health`
-Checks the health of the database connection.
+- **Description**: Checks the health of the database connection.
+- **Response**:
+  ```json
+  {
+    "status": "healthy"
+  }
+  ```
 
-**Response:**
-```json
-{
-  "status": "healthy"
-}
-```
-
-## Database Configuration
+## Database Configuration & Secret 
 
 The service connects to a PostgreSQL database using the following environment variables:
 
@@ -108,6 +103,10 @@ The service connects to a PostgreSQL database using the following environment va
 The application uses SQLAlchemy for database interaction, and `SessionLocal` provides access to the database session.
 
 If the database does not exist, it will be created automatically using the `create_database_if_not_exists()` function.
+
+For JWT and secret, it require following environment variables as well:
+- **SECRET_KEY**: Random and big string
+- **ACCESS_TOKEN_EXPIRE_MINUTES**: Expire time of JWT tokens
 
 ## Installation
 
@@ -135,16 +134,50 @@ If the database does not exist, it will be created automatically using the `crea
    uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
    ```
 
-   This will start the server on **port 8000** by default.
+   This will start the server on **port 8000** by default. Checkout here after running [Swagger UI](http://localhost:8000/docs)
+
+
+## Logging
+The API logs all requests and errors using Python's built-in logging module. The logs are saved to a file `app.log` and are also printed to the console.
+
+
+## Example Usage
+1. **Signup**:
+   ```bash
+    curl --location --request POST "http://localhost:8000/auth/signup" --header "Content-Type: application/json" --data-raw "{\"email\": \"abc@gmail.com\", \"password\": \"abc\"}"
+   ```
+
+2. **Sign-in**:
+   ```bash
+    curl --location --request POST "http://localhost:8000/auth/signin" --header "Content-Type: application/json" --data-raw "{\"email\": \"<your_email>\", \"password\": \"<your_password>\"}"
+   ```
+
+3. **Refresh Token**:
+   ```bash
+    curl --location --request PUT "http://localhost:8000/auth/refresh" --header "Content-Type: application/json" --data "{ \"access_token\": \"<access_token>\"}"
+   ```
+
+4. **Revoke Token**:
+   ```bash
+    curl --location --request DELETE "http://localhost:8000/auth/revoke" --header "Content-Type: application/json" --data "{ \"access_token\": \"<access_token>\"}"
+   ```
+   
+5. **Authorize Token**:
+   ```bash
+    curl --location --request GET "http://localhost:8000/auth/authorize-token" --header "Content-Type: application/json" --data "{ \"access_token\": \"<access_token>\"}"
+   ```
+
+6. **Health Check**:
+   ```bash
+    curl -X GET "http://localhost:8000/auth/health"
+   ```
 
 ## Dependencies
-
 - FastAPI
-- SQLAlchemy
-- JWT
-- Uvicorn
-- Python 3.x
+- SQLAlchemy (Async)
+- JWT (jsonwebtoken)
+- PostgreSQL
 
 ## License
+This project is licensed under the Apache License.
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
