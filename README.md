@@ -138,11 +138,7 @@ For JWT and secret, it require following environment variables as well:
    git clone https://github.com/sidd6p/JWT-Auth-Service.git
    cd JWT-Auth-Service
    ```
-2. Set up environment variables (e.g., database connection strings, secret keys) in a `.env` file.
-   - Create .env file in folder
-   - Copy paste the content of env_example.txt file into .env file
-
-4. Run the docker compose file:
+2. Run the docker compose file:
    ```bash
    docker-compose up
    ```
