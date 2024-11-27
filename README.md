@@ -13,7 +13,7 @@
    - [GET /authorize-token](#get-authorize-token)
    - [GET /health](#get-health)
 3. [Database Configuration & Secret](#database-configuration--secret)
-4. [Installation on localhost](#installation)
+4. [Installation](#installation)
 5. [Logging](#logging)
 6. [Example Usage](#example-usage)
 7. [Dependencies](#dependencies)
@@ -152,9 +152,9 @@ For JWT and secret, it require following environment variables as well:
 
 4. Set up environment variables (e.g., database connection strings, secret keys) in a `.env` file.
 
-5. Run the FastAPI application:
+5. Run the docker compose file:
    ```bash
-   uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+   docker-compose up
    ```
 
    This will start the server on **port 8000** by default. Checkout here after running [Swagger UI](http://localhost:8000/docs)
