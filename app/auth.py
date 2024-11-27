@@ -11,9 +11,9 @@ from app.utils import (
     verify_password,
     create_access_token,
     decode_token,
-    delete_active_token,
-    check_active_token,
-    save_active_token,
+    delete_access_token,
+    check_access_token,
+    save_access_token,
     save_new_user,
     check_user,
     log_route,
@@ -35,14 +35,18 @@ router = APIRouter()
 @router.post("/signup", response_model=Token, status_code=status.HTTP_201_CREATED)
 async def sign_up(user: UserCreate, db: AsyncSession = Depends(get_db)):
     """
-    Handles user signup by creating a new user in the database if the email is not already registered.
-    If successful, generates and returns an access token for the new user.
+    Handles the user signup process by:
+    1. Checking if the email is already registered.
+    2. Creating a new user in the database if the email is not already taken.
+    3. Generating an access token for the newly created user.
+    4. Saving the generated token as active for the user.
+    If any step fails, an appropriate error is logged and returned to the client.
     """
     log_route(
         "/signup", logging.INFO, f"Signup request received for email: {user.email}"
     )
 
-    # Check if the user with the given email already exists
+    # Check if the user with the given email already exists in the database
     db_user = await check_user(db, user.email)
     if db_user:
         log_route(
@@ -56,7 +60,7 @@ async def sign_up(user: UserCreate, db: AsyncSession = Depends(get_db)):
         )
 
     try:
-        # Create a new user in the database
+        # Create a new user in the database, hash the password, and return the user ID
         user_id = await save_new_user(db, user)
         log_route(
             "/signup",
@@ -64,34 +68,12 @@ async def sign_up(user: UserCreate, db: AsyncSession = Depends(get_db)):
             f"User created successfully with email: {user.email}",
         )
 
-        # Generate an access token for the new user
-        access_token = await create_access_token(data={"user_id": user_id})
+        # Generate and save an access token for the new user using the user ID
+        access_token = await create_access_token(db, data={"user_id": user_id})
 
-        # Save the access token as active for the user
-        await save_active_token(db, user_id, access_token)
-
+        # Return the access token and token type
         return {"access_token": access_token, "token_type": "bearer"}
 
-    except IntegrityError as e:
-        log_route(
-            "/signup",
-            logging.ERROR,
-            f"Integrity error during signup for email {user.email}: {str(e)}",
-        )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered. Please use a different email.",
-        )
-    except DatabaseError as e:
-        log_route(
-            "/signup",
-            logging.ERROR,
-            f"Database error during signup for email {user.email}: {str(e)}",
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error while processing signup. Please try again later.",
-        )
     except Exception as e:
         log_route(
             "/signup",
@@ -107,11 +89,15 @@ async def sign_up(user: UserCreate, db: AsyncSession = Depends(get_db)):
 # Signin - Authenticate user and replace old token with new one
 @router.post("/signin", response_model=Token, status_code=status.HTTP_200_OK)
 async def sign_in(user: UserLogin, db: AsyncSession = Depends(get_db)):
+    """
+    Authenticates a user by verifying their email and password.
+    If valid, generates and returns a new access token while invalidating any previous token.
+    """
     log_route(
         "/signin", logging.INFO, f"Signin request received for email: {user.email}"
     )
 
-    # Check if the user exists
+    # Check if the user exists and verify their password
     db_user = await check_user(db, user.email)
     if not db_user or not verify_password(user.password, db_user.hashed_password):
         log_route(
@@ -125,34 +111,18 @@ async def sign_in(user: UserLogin, db: AsyncSession = Depends(get_db)):
         )
 
     try:
-        # Check and delete existing active token
-        token_deleted = await delete_active_token(db, user_id=db_user.id)
-        if token_deleted:
-            log_route(
-                "/signin", logging.INFO, f"Old token revoked for user ID: {db_user.id}"
-            )
-    except Exception as e:
-        log_route(
-            "/signin",
-            logging.ERROR,
-            f"Error while revoking old token for user ID {db_user.id}: {e}",
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to revoke the existing token. Please try again later.",
-        )
+        # Generate a new access token for the user
+        access_token = await create_access_token(db, data={"user_id": db_user.id})
 
-    # Create a new token
-    try:
-        access_token = await create_access_token(data={"user_id": db_user.id})
-        await save_active_token(db, db_user.id, access_token)
-
+        # Log the successful signin
         log_route(
             "/signin",
             logging.INFO,
             f"User signed in successfully for email: {user.email}",
         )
+
         return {"access_token": access_token, "token_type": "bearer"}
+
     except Exception as e:
         log_route(
             "/signin",
@@ -170,73 +140,58 @@ async def sign_in(user: UserLogin, db: AsyncSession = Depends(get_db)):
 async def refresh_token(
     request: RevokeTokenRequest, db: AsyncSession = Depends(get_db)
 ):
-    active_token = request.access_token
+    """
+    Refreshes the user's access token by validating the old token.
+    If valid, generates and returns a new token, invalidating the old one.
+    """
+    access_token = request.access_token
+
     log_route(
         "/refresh",
         logging.INFO,
-        f"Refresh token request received for token: {active_token}",
+        f"Refresh token request received for token: {access_token}",
     )
 
     try:
-        if await check_active_token(db, active_token=active_token):
-            log_route("/refresh", logging.INFO, f"Old token is valid: {active_token}")
-        else:
-            log_route(
-                "/refresh",
-                logging.WARNING,
-                f"The provided token is invalid or already revoked: {active_token}",
-            )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="The provided token is invalid or already revoked.",
-            )
+        # Validate the old token
+        payload = await check_access_token(db=db, access_token=access_token)
+        log_route("/refresh", logging.INFO, f"Old token is valid: {access_token}")
 
-        decoded = await decode_token(active_token)
-
-        if await delete_active_token(db, active_token=active_token):
-            log_route(
-                "/refresh",
-                logging.INFO,
-                f"Old token revoked successfully: {active_token}",
-            )
-        else:
-            log_route(
-                "/refresh", logging.WARNING, f"Token already revoked: {active_token}"
-            )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="The provided token is invalid or already revoked.",
-            )
-
-        new_token = await create_access_token(data={"user_id": decoded["user_id"]})
-        await save_active_token(db, decoded["user_id"], new_token)
+        # Generate a new access token for the user
+        new_token = await create_access_token(
+            db=db, data={"user_id": payload["user_id"]}
+        )
 
         log_route(
             "/refresh",
             logging.INFO,
-            f"Token refreshed successfully for user ID: {decoded['user_id']}",
+            f"Token refreshed successfully for user ID: {payload['user_id']}",
         )
+
         return {"access_token": new_token, "token_type": "bearer"}
 
-    except jwt.ExpiredSignatureError:
+    except jwt.ExpiredSignatureError as e:
         log_route(
             "/refresh",
             logging.WARNING,
-            f"Refresh failed: Expired token used: {active_token}",
+            f"Refresh failed: Expired token used: {access_token} : {e}",
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="The provided token is expired.",
         )
-    except jwt.InvalidTokenError:
+
+    except jwt.InvalidTokenError as e:
         log_route(
             "/refresh",
             logging.WARNING,
-            f"Refresh failed: Invalid token used: {active_token}",
+            f"Refresh failed: Invalid token used: {access_token} : {e}",
         )
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
         )
+
     except Exception as e:
         log_route(
             "/refresh", logging.ERROR, f"Unexpected error during token refresh: {e}"
@@ -250,61 +205,37 @@ async def refresh_token(
 # Revoke - Delete the token (either by user or by token)
 @router.post("/revoke", status_code=status.HTTP_200_OK)
 async def revoke_token(request: RevokeTokenRequest, db: AsyncSession = Depends(get_db)):
-    active_token = request.access_token
+    access_token = request.access_token
     log_route(
         "/revoke",
         logging.INFO,
-        f"Revoke token request received for token: {active_token}",
+        f"Revoke token request received for token: {access_token}",
     )
 
     try:
-        if await check_active_token(db, active_token=active_token):
-            log_route("/revoke", logging.INFO, f"Old token is valid: {active_token}")
-        else:
+        if await delete_access_token(db, access_token=access_token):
             log_route(
-                "/revoke",
-                logging.WARNING,
-                f"The provided token is invalid or already revoked: {active_token}",
-            )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="The provided token is invalid or already revoked.",
-            )
-
-        if await delete_active_token(db, active_token=active_token):
-            log_route(
-                "/revoke", logging.INFO, f"Token revoked successfully: {active_token}"
+                "/revoke", logging.INFO, f"Token revoked successfully: {access_token}"
             )
             return {"message": "Token revoked successfully."}
         else:
             log_route(
                 "/revoke",
                 logging.WARNING,
-                f"Token already revoked or invalid: {active_token}",
+                f"Token already revoked or invalid: {access_token}",
             )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="The provided token is invalid or already revoked.",
+            raise jwt.InvalidTokenError(
+                "The provided token is invalid or already revoked."
             )
-    except jwt.ExpiredSignatureError:
+
+    except jwt.InvalidTokenError as e:
         log_route(
             "/revoke",
             logging.WARNING,
-            f"Revoke failed: Expired token used: {active_token}",
+            f"Revocation  failed: Invalid token used: {access_token}",
         )
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="The provided token is expired.",
-        )
-    except jwt.InvalidTokenError:
-        log_route(
-            "/revoke",
-            logging.WARNING,
-            f"Revoke failed: Invalid token used: {active_token}",
-        )
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"{e}")
+
     except Exception as e:
         log_route(
             "/revoke", logging.ERROR, f"Unexpected error during token revocation: {e}"
@@ -324,24 +255,24 @@ async def authorize_token(
     Verifies the validity of the provided access token. If the token is valid and authorized,
     returns the token and associated user data. If not, raises an error.
     """
-    active_token = request.access_token
+    access_token = request.access_token
     log_route(
         "/authorize-token",
         logging.INFO,
-        f"Authorization request received for token: {active_token}",
+        f"Authorization request received for token: {access_token}",
     )
 
     try:
         # Check if the token is active and authorized in the database
-        decoded = await check_active_token(db, active_token=active_token)
+        decoded = await check_access_token(db, access_token=access_token)
         if decoded:
             log_route(
-                "/authorize-token", logging.INFO, f"Token is authorized: {active_token}"
+                "/authorize-token", logging.INFO, f"Token is authorized: {access_token}"
             )
 
             # Return the token and associated user data if valid
             return {
-                "access_token": active_token,
+                "access_token": access_token,
                 "token_type": "bearer",
                 "user_id": decoded["user_id"],
             }
@@ -349,28 +280,26 @@ async def authorize_token(
             log_route(
                 "/authorize-token",
                 logging.WARNING,
-                f"Unauthorized or revoked token: {active_token}",
+                f"Unauthorized or revoked token: {access_token}",
             )
             raise jwt.InvalidTokenError("Invalid JWT token.")
     except jwt.ExpiredSignatureError:
         log_route(
             "/authorize-token",
             logging.WARNING,
-            f"Authorization failed: Expired token used: {active_token}",
+            f"Authorization failed: Expired token used: {access_token}",
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="The provided token has expired.",
         )
-    except jwt.InvalidTokenError:
+    except jwt.InvalidTokenError as e:
         log_route(
             "/authorize-token",
             logging.WARNING,
-            f"Authorization failed: Invalid token used: {active_token}",
+            f"Authorization failed: Invalid token used: {access_token}",
         )
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail={e})
     except Exception as e:
         log_route(
             "/authorize-token",
@@ -407,12 +336,12 @@ async def health_check(db: AsyncSession = Depends(get_db)):
             )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Unexpected result from database. Health check failed.",
+                detail="Health Check failed. Please try again later.",
             )
 
     except Exception as e:
         log_route("/health", logging.ERROR, f"Database connection error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database connection error. Please try again later.",
+            detail="Health Check failed. Please try again later.",
         )

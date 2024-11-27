@@ -12,16 +12,16 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
 
-    active_token = relationship("ActiveToken", back_populates="user", uselist=False)
+    access_token = relationship("ActiveToken", back_populates="user", uselist=False)
 
 
 class ActiveToken(Base):
-    __tablename__ = "active_tokens"
+    __tablename__ = "access_tokens"
 
     id = Column(Integer, primary_key=True, index=True)
-    active_token = Column(String, unique=True, nullable=False)
+    access_token = Column(String, unique=True, nullable=False)
     created_at = Column(DateTime, default=func.now())
 
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
 
-    user = relationship("User", back_populates="active_token")
+    user = relationship("User", back_populates="access_token")
