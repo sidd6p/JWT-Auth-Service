@@ -150,6 +150,48 @@ async def refresh_token(
         )
 
 
+# Authorize Token - Check if the provided token is valid and authorized
+@router.post("/authorize-token", response_model=Token, status_code=status.HTTP_200_OK)
+async def authorize_token(request: RevokeTokenRequest, db: AsyncSession = Depends(get_db)):
+    active_token = request.access_token
+    logger.info("Authorization request received for token: %s", active_token)
+
+    try:
+        # Check if the token is active and authorized
+        if await check_active_token(db, active_token=active_token):
+            logger.info("Token is authorized: %s", active_token)
+
+            # Decode the token to verify its contents
+            decoded = await decode_token(active_token)
+            logger.info("Decoded token for user ID: %s", decoded["user_id"])
+
+            # Return a response with the decoded token data
+            return {"access_token": active_token, "token_type": "bearer", "user_id": decoded["user_id"]}
+        else:
+            logger.warning("Unauthorized or revoked token: %s", active_token)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="The provided token is either unauthorized or already revoked.",
+            )
+    except jwt.ExpiredSignatureError:
+        logger.warning("Authorization failed: Expired token used: %s", active_token)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="The provided token has expired.",
+        )
+    except jwt.InvalidTokenError:
+        logger.warning("Authorization failed: Invalid token used: %s", active_token)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
+        )
+    except Exception as e:
+        logger.error("Unexpected error during token authorization: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to authorize token due to a server error. Please try again later.",
+        )
+
+
 # Revoke - Delete the token (either by user or by token)
 @router.post("/revoke", status_code=status.HTTP_200_OK)
 async def revoke_token(request: RevokeTokenRequest, db: AsyncSession = Depends(get_db)):
